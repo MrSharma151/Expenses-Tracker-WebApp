@@ -1,42 +1,44 @@
-#———stage1 - jar builder ————-
+# -------- stage1 - jar builder --------
 
 # Maven image
-
-FROM maven:3.8.3-openjdk-17 AS builder 
+FROM maven:3.8.3-openjdk-17 AS builder
 
 # Set working directory
-
 WORKDIR /app
 
-# Copy source code from local to container
+# Copy pom.xml first for better layer caching
+COPY pom.xml /app/
 
-COPY . /app
+# Download dependencies (cached layer)
+RUN mvn dependency:go-offline
+
+# Copy source code from local to container
+COPY src /app/src
 
 # Build application and skip test cases
+RUN mvn clean package -DskipTests=true
 
-#EXPOSE 8080
+# EXPOSE is not required in build stage
+# EXPOSE 8080
 
-RUN mvn clean install -DskipTests=true
-
-#ENTRYPOINT ["java", "-jar", "/expenseapp.jar"]
+# ENTRYPOINT is not required in build stage
+# ENTRYPOINT ["java", "-jar", "/expenseapp.jar"]
 
 #--------------------------------------
 # Stage 2 - app build
 #--------------------------------------
 
 # Import small size java image
+FROM eclipse-temurin:17-jre-alpine
 
-FROM openjdk:17-alpine
-
-WORKDIR /app 
+# Set working directory
+WORKDIR /app
 
 # Copy build from stage 1 (builder)
+COPY --from=builder /app/target/*.jar /app/expenseapp.jar
 
-COPY --from=builder /app/target/*.jar /app/target/expenseapp.jar
-
-# Expose application port 
-
+# Expose application port
 EXPOSE 8080
 
 # Start the application
-ENTRYPOINT ["java", "-jar", "/app/target/expenseapp.jar"]
+ENTRYPOINT ["java", "-jar", "/app/expenseapp.jar"]

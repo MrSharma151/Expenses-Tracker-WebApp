@@ -1,40 +1,77 @@
 version: "3.8"
+
 services:
+  # --------------------------------------
+  # MySQL Database Service
+  # --------------------------------------
   mysql:
-    image: mysql:latest
+    image: mysql:8.0                 # Pin MySQL version (avoid latest in prod)
     container_name: mysql
+    env_file:
+      - .env                         # Load secrets from .env
     environment:
-      MYSQL_ROOT_PASSWORD: Test@123
-      MYSQL_DATABASE: expenses_tracker
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      TZ: Asia/Kolkata
     volumes:
-      - ./mysql-data:/var/lib/mysql
+      - mysql-data:/var/lib/mysql    # Docker-managed named volume (persistent)
+      - ./sql_script.sql:/docker-entrypoint-initdb.d/sql_script.sql  # DB initialization
     networks:
       - appbridge
     healthcheck:
-      test: ["CMD","mysqladmin","ping","-h","localhost","-uroot","-pTest@123"]
+      test: ["CMD","mysqladmin","ping","-h","localhost","-uroot","-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
     restart: always
 
+  # --------------------------------------
+  # Spring Boot Application Service
+  # --------------------------------------
   mainapp:
-    image: snehcreate/expensetracker_v3
-    container_name: Expensetracker
+    build: .
+    container_name: expense-tracker-app
+    env_file:
+      - .env                         # Same env file used by app
     environment:
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/expenses_tracker?allowPublicKeyRetrieval=true&useSSL=false"
-      SPRING_DATASOURCE_PASSWORD: Test@123
-    ports:
-      - "8080:8080"
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+    expose:
+      - "8080"                       # Expose internally (NGINX will access this)
     networks:
       - appbridge
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy   # Wait for DB readiness
     restart: always
 
+  # --------------------------------------
+  # NGINX Reverse Proxy Service
+  # --------------------------------------
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile   # NGINX Dockerfile
+    container_name: nginx
+    ports:
+      - "80:80"                      # Public entry point
+    networks:
+      - appbridge
+    depends_on:
+      - mainapp
+    restart: always
+
+# --------------------------------------
+# Docker Network
+# --------------------------------------
 networks:
   appbridge:
+    driver: bridge
 
+# --------------------------------------
+# Docker Volumes
+# --------------------------------------
 volumes:
-  mysql-data:
+  mysql-data:                        # Docker-managed volume
